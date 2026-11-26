@@ -1,127 +1,115 @@
-# 🚀 Nova AI - Full-Stack Gemini Chatbox
+# Nova AI — Full-Stack Gemini Chatbox
 
-A modern, production-ready AI Chatbox web application built with **React**, **Vite**, **Vercel Serverless Functions**, and the **Google Gemini REST API** (`gemini-1.5-flash`).
+A clean, modern AI Chatbox built with **React**, **Vite**, **CSS**, **Google Gemini API**, and **Vercel Serverless Functions**.
 
-Designed with a clean white and soft purple aesthetic, complete mobile responsiveness, dark/light theme switcher, code block highlighting with one-click copying, and multi-turn conversational context.
+## Features
 
----
-
-## 🌟 Key Features
-
-- **⚡ Google Gemini 1.5 Flash**: Lightning-fast responses powered by Google's flagship multimodal model.
-- **🔒 Enterprise Security**: `GEMINI_API_KEY` is strictly held on the server inside a Vercel Serverless Function (`api/chat.js`). The secret key is **never** exposed to the browser or frontend bundle.
-- **💬 Conversational Context**: Multi-turn dialogue history allows Nova to remember past messages in the session.
-- **🎨 Premium UI/UX**: Clean white & lavender theme with dark mode toggle, smooth animations, and responsive layout for desktop, tablet, and mobile.
-- **📋 One-Click Copy**: Copy complete AI responses or individual code snippets with visual checkmark feedback.
-- **🛡️ Safe Formatting**: Safely parses Markdown bolding, bullet points, inline code, and fenced code blocks without using `dangerouslySetInnerHTML`, guaranteeing XSS protection.
-- **🧹 Clear & New Chat**: Start fresh anytime with confirmation modals to prevent accidental history loss.
-- **🚀 Vercel Ready**: Pre-configured with serverless functions and Vite build settings for one-click Vercel deployment.
+- **Real Google Gemini AI**: Powered by the official Google Gemini REST API through a secure Vercel Serverless Function (`api/chat.js`).
+- **Protected API Key**: `GEMINI_API_KEY` stays strictly on the server via environment variables and is never exposed in frontend code.
+- **Multi-Chat Conversation History**: Save, switch between, and delete conversations locally in the browser (`localStorage`), plus multi-turn context sent to Gemini.
+- **Clean White & Soft Purple UI**: Responsive desktop & mobile layout, Dark/Light mode toggle, welcome screen with starter prompts, loading dots, and clear error messages with retry.
+- **Keyboard & Clipboard Support**: `Enter` to send, `Shift + Enter` for a new line, automatic scrolling, clear-chat confirmation modal, and one-click copy for AI replies and code snippets.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
-```
+```text
 my-ai-chatbox/
 ├── api/
-│   └── chat.js          # Vercel Serverless Function (Calls Google Gemini REST API)
-├── public/              # Static assets
+│   └── chat.js                    # Vercel Serverless Function calling Gemini API
+├── public/
+│   └── favicon.svg                # App icon
 ├── src/
-│   ├── App.jsx          # Main React Application & UI components
-│   ├── App.css          # Premium responsive styling (White & Soft Purple theme)
-│   ├── index.css        # CSS variables, dark/light themes, typography
-│   └── main.jsx         # React application root
-├── .env.example         # Template for environment variables
-├── .gitignore           # Excludes node_modules, dist, and secret .env files
-├── index.html           # HTML5 entry with Google Fonts
-├── package.json         # Project metadata and dependencies
-├── README.md            # Documentation & deployment guide
-├── vercel.json          # Vercel deployment configuration
-└── vite.config.js       # Vite build & local development serverless middleware
+│   ├── components/
+│   │   ├── ChatHeader.jsx         # Top bar with theme, new chat, and clear controls
+│   │   ├── ChatInput.jsx          # Auto-resizing input with Enter / Shift+Enter
+│   │   ├── ConfirmModal.jsx       # Clear chat confirmation modal
+│   │   ├── FormattedMessage.jsx   # Safe Markdown & code block renderer
+│   │   ├── MessageList.jsx        # Message bubbles, timestamps, copy, loading dots
+│   │   ├── Sidebar.jsx            # Conversation history & theme controls
+│   │   └── WelcomeScreen.jsx      # Starter prompt cards
+│   ├── App.jsx                    # Main app state and API integration
+│   ├── App.css                    # Responsive layout and component styles
+│   ├── index.css                  # Light/dark CSS theme variables
+│   └── main.jsx                   # React root
+├── .env.example                   # Template for GEMINI_API_KEY
+├── .gitignore                     # Protects .env*, node_modules, dist, .vercel
+├── index.html                     # HTML entry page
+├── package.json                   # Dependencies and scripts
+├── vercel.json                    # Vercel build settings
+└── vite.config.js                 # Vite config + local /api/chat dev handler
 ```
 
 ---
 
-## 🛠️ Tech Stack
+## Local Setup (Beginner Guide)
 
-- **Frontend**: React 18, Vite, Lucide Icons, Pure CSS
-- **Backend**: Vercel Serverless Functions (Node.js runtime)
-- **AI Model**: Google Gemini 1.5 Flash (`gemini-1.5-flash`)
-- **Hosting & Deployment**: Vercel
-- **Source Control**: Git & GitHub
+### 1. Get a Free Google Gemini API Key
+1. Visit [Google AI Studio](https://aistudio.google.com/app/apikey).
+2. Sign in with your Google account and click **Create API key**.
+3. Copy the key somewhere safe.
 
----
-
-## 💻 Local Development Setup
-
-### 1. Prerequisites
-- **Node.js**: v18.0.0 or higher
-- **Google Gemini API Key**: Free at [Google AI Studio](https://aistudio.google.com/app/apikey)
-
-### 2. Installation
-Open your terminal in the project directory:
+### 2. Install Dependencies
+Open a terminal in the project folder and run:
 
 ```bash
-cd "C:\Users\Afroj\OneDrive\Desktop\my-ai-chatbox"
 npm install
 ```
 
-### 3. Configure Your Environment Variable
+### 3. Add Your Secret API Key Locally
 1. Copy `.env.example` to `.env.local`:
-   ```bash
-   cp .env.example .env.local
-   ```
-2. Open `.env.local` and paste your Gemini API key:
+   - **Windows PowerShell**:
+     ```powershell
+     Copy-Item .env.example .env.local
+     ```
+2. Open `.env.local` and paste your key:
    ```env
-   GEMINI_API_KEY=AIzaSy...your_actual_key_here
+   GEMINI_API_KEY=your_real_gemini_api_key_here
    ```
+   > **Important**: Never commit `.env.local` to GitHub. `.gitignore` already protects it.
 
-### 4. Start Development Server
+### 4. Run Locally
+You can run locally in two ways:
+
+- **With Vite (`npm run dev`)**:
+  ```bash
+  npm run dev
+  ```
+  Open `http://localhost:3000`.
+
+- **With Vercel CLI (`vercel dev`)**:
+  ```bash
+  npx vercel dev
+  ```
+
+### 5. Build for Production
 ```bash
-npm run dev
+npm run build
 ```
 
-Open your browser at **[http://localhost:3000](http://localhost:3000)**.
+---
+
+## GitHub Upload Commands (Beginner Guide)
+
+Check `git status` first to make sure `.env.local` is **not** listed:
+
+```bash
+git status
+git add .
+git commit -m "Build Nova AI Gemini chatbox"
+git branch -M main
+git remote add origin https://github.com/YOUR_USERNAME/my-ai-chatbox.git
+git push -u origin main
+```
 
 ---
 
-## 🚢 Deploying to Vercel (Production)
+## Deploying to Vercel
 
-### Option A: Deploy via GitHub (Recommended)
-1. Push your repository to GitHub (see instructions below).
-2. Go to **[vercel.com](https://vercel.com)** and log in.
-3. Click **"Add New..."** → **"Project"**.
-4. Select your `my-ai-chatbox` GitHub repository and click **Import**.
-5. Under **Environment Variables**, add:
-   - **Key**: `GEMINI_API_KEY`
-   - **Value**: `Your Google Gemini API Key`
-6. Click **Deploy**. Vercel will build the React app and deploy the `api/chat.js` serverless function automatically!
-
----
-
-## 🐙 Pushing to GitHub
-
-To publish this project to a new GitHub repository:
-
-1. Open your terminal in the project folder:
-   ```bash
-   cd "C:\Users\Afroj\OneDrive\Desktop\my-ai-chatbox"
-   ```
-2. Initialize Git:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit: Nova AI Chatbox with Gemini 1.5 Flash and Vercel Serverless"
-   ```
-3. Create a new repository on [GitHub](https://github.com/new) (e.g. named `my-ai-chatbox`).
-4. Link your local repo and push (replace `<username>` with your GitHub username):
-   ```bash
-   git branch -M main
-   git remote add origin https://github.com/<username>/my-ai-chatbox.git
-   git push -u origin main
-   ```
-
----
-
-## 📄 License
-MIT License. Built for learning, college project portfolios, and personal use.
+1. Go to [vercel.com](https://vercel.com) and click **Add New → Project**.
+2. Import your `my-ai-chatbox` GitHub repository.
+3. Open **Environment Variables** and add:
+   - **Name**: `GEMINI_API_KEY`
+   - **Value**: your Google Gemini API key
+4. Click **Deploy**. Vercel builds the Vite frontend and deploys `api/chat.js` automatically.

@@ -1,19 +1,51 @@
 /**
  * Vercel Serverless Function: POST /api/chat
- * Securely communicates with the official Google Gemini REST API.
- * The GEMINI_API_KEY is read server-side from environment variables
- * and is never exposed to the client or browser.
+ * Securely proxies chat requests to the official Google Gemini REST API.
+ * GEMINI_API_KEY is read strictly from server environment variables.
  */
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const DEFAULT_MODEL = 'gemini-flash-latest';
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const MAX_MESSAGE_LENGTH = 4000;
+const MAX_HISTORY_ITEMS = 16;
+
+function normalizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+
+  const recent = history.slice(-MAX_HISTORY_ITEMS);
+  const contents = [];
+
+  for (const item of recent) {
+    if (!item || typeof item.content !== 'string') continue;
+    const text = item.content.trim().slice(0, MAX_MESSAGE_LENGTH);
+    if (!text) continue;
+
+    const role = item.role === 'assistant' || item.role === 'model' ? 'model' : 'user';
+
+    // Gemini requires conversation history to start with a user turn
+    if (contents.length === 0 && role === 'model') {
+      continue;
+    }
+
+    const prev = contents[contents.length - 1];
+    if (prev && prev.role === role) {
+      prev.parts[0].text += `\n\n${text}`;
+    } else {
+      contents.push({
+        role,
+        parts: [{ text }]
+      });
+    }
+  }
+
+  return contents;
+}
 
 export default async function handler(req, res) {
-  // Set CORS and response headers
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -21,177 +53,158 @@ export default async function handler(req, res) {
 
   if (req.method !== 'POST') {
     return res.status(405).json({
-      error: 'Method Not Allowed. Only POST requests are supported.'
+      error: 'Method not allowed. Please send a POST request to /api/chat.'
     });
   }
 
-  // 1. Verify GEMINI_API_KEY exists in server environment
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey.trim() === '' || apiKey === 'your_gemini_api_key_here') {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
     return res.status(500).json({
-      error: 'Gemini API key is not configured on the server. Please add GEMINI_API_KEY in your Vercel or .env settings.'
+      error:
+        'GEMINI_API_KEY is not configured on the server. Add it to .env.local for local testing or in your Vercel Project Environment Variables.'
     });
   }
+
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      return res.status(400).json({ error: 'Invalid JSON request body.' });
+    }
+  }
+
+  const { message, history } = body || {};
+
+  if (typeof message !== 'string' || message.trim().length === 0) {
+    return res.status(400).json({
+      error: 'Please enter a non-empty message before sending.'
+    });
+  }
+
+  const trimmedMessage = message.trim();
+  if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
+    return res.status(400).json({
+      error: `Message is too long. Maximum allowed length is ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`
+    });
+  }
+
+  const contents = normalizeHistory(history);
+  const lastTurn = contents[contents.length - 1];
+
+  if (lastTurn && lastTurn.role === 'user') {
+    lastTurn.parts[0].text += `\n\n${trimmedMessage}`;
+  } else {
+    contents.push({
+      role: 'user',
+      parts: [{ text: trimmedMessage }]
+    });
+  }
+
+  const model = (process.env.GEMINI_MODEL || DEFAULT_MODEL).trim();
+  const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
+
+  const payload = {
+    contents,
+    systemInstruction: {
+      parts: [
+        {
+          text:
+            'You are Nova, a helpful, clear, and friendly AI assistant. Answer accurately and concisely. Use clean Markdown (headings, bullet points, bold text, and fenced code blocks with language tags) whenever it makes the response easier to read.'
+        }
+      ]
+    },
+    generationConfig: {
+      temperature: 0.7,
+      topP: 0.95,
+      maxOutputTokens: 2048
+    }
+  };
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   try {
-    // 2. Parse request body safely
-    let body = req.body;
-    if (typeof body === 'string') {
-      try {
-        body = JSON.parse(body);
-      } catch (parseErr) {
-        return res.status(400).json({ error: 'Invalid JSON payload received.' });
-      }
-    }
-
-    const { message, history } = body || {};
-
-    // 3. Validate user message
-    if (!message || typeof message !== 'string' || message.trim().length === 0) {
-      return res.status(400).json({
-        error: 'Message is required and must be a non-empty string.'
-      });
-    }
-
-    const trimmedMessage = message.trim();
-    if (trimmedMessage.length > 2000) {
-      return res.status(400).json({
-        error: 'Message exceeds the maximum limit of 2,000 characters.'
-      });
-    }
-
-    // 4. Format conversation history for Gemini API
-    // Gemini expects: contents: [{ role: 'user' | 'model', parts: [{ text: '...' }] }]
-    const contents = [];
-
-    if (Array.isArray(history)) {
-      // Keep only the last 10 messages for context efficiency
-      const recentHistory = history.slice(-10);
-
-      for (const item of recentHistory) {
-        if (!item || typeof item.content !== 'string' || !item.content.trim()) {
-          continue;
-        }
-
-        const geminiRole = item.role === 'assistant' || item.role === 'model' ? 'model' : 'user';
-        const textContent = item.content.slice(0, 2000);
-
-        // Ensure roles alternate appropriately as required by Gemini
-        if (contents.length > 0 && contents[contents.length - 1].role === geminiRole) {
-          // Merge consecutive messages with the same role
-          contents[contents.length - 1].parts[0].text += '\n\n' + textContent;
-        } else {
-          contents.push({
-            role: geminiRole,
-            parts: [{ text: textContent }]
-          });
-        }
-      }
-    }
-
-    // Append the new user message
-    if (contents.length > 0 && contents[contents.length - 1].role === 'user') {
-      contents[contents.length - 1].parts[0].text += '\n\n' + trimmedMessage;
-    } else {
-      contents.push({
-        role: 'user',
-        parts: [{ text: trimmedMessage }]
-      });
-    }
-
-    // 5. Construct payload for Gemini REST API
-    const geminiPayload = {
-      contents: contents,
-      systemInstruction: {
-        parts: [
-          {
-            text: 'You are Nova, a friendly, modern, and highly capable AI assistant. Provide clear, accurate, and neatly structured responses. Use markdown for code blocks, bullet points, and headers when helpful.'
-          }
-        ]
+    const geminiResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
       },
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
-        topP: 0.95
-      }
-    };
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
 
-    // 6. Call the official Gemini REST endpoint
-    const endpointUrl = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout
-
-    let geminiRes;
+    let data = null;
     try {
-      geminiRes = await fetch(endpointUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(geminiPayload),
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timeoutId);
+      data = await geminiResponse.json();
+    } catch {
+      data = null;
     }
 
-    const data = await geminiRes.json();
+    if (!geminiResponse.ok) {
+      const status = geminiResponse.status;
+      const upstreamMessage = data?.error?.message || '';
+      console.error(`Gemini API error (${status}):`, upstreamMessage || data);
 
-    // 7. Handle non-200 responses from Google API
-    if (!geminiRes.ok) {
-      console.error('Gemini API Error Response:', data);
-
-      const status = geminiRes.status;
-      let friendlyError = 'An error occurred while contacting Google Gemini API.';
-
+      let friendlyError = 'Unable to get a response from Google Gemini right now. Please try again.';
       if (status === 400) {
-        friendlyError = data?.error?.message || 'Invalid request format sent to Gemini API.';
+        friendlyError = upstreamMessage || 'The request sent to Gemini was invalid.';
       } else if (status === 401 || status === 403) {
-        friendlyError = 'Invalid or unauthorized Gemini API key. Please verify your GEMINI_API_KEY in environment variables.';
+        friendlyError =
+          'Your Gemini API key was rejected or lacks permission. Please verify GEMINI_API_KEY in your environment variables.';
+      } else if (status === 404) {
+        friendlyError = `The configured Gemini model ("${model}") was not found. Check GEMINI_MODEL or update to a supported model.`;
       } else if (status === 429) {
-        friendlyError = 'Gemini API rate limit reached. Please wait a moment before sending another message.';
-      } else if (status === 503 || status === 500) {
-        friendlyError = 'Google Gemini service is temporarily overloaded. Please try again shortly.';
+        friendlyError =
+          'Gemini API rate limit or quota reached. Please wait a few seconds and try again.';
+      } else if (status >= 500) {
+        friendlyError =
+          'Google Gemini is temporarily unavailable or overloaded. Please try again shortly.';
       }
 
-      return res.status(status >= 400 && status < 600 ? status : 500).json({
+      return res.status(status >= 400 && status < 600 ? status : 502).json({
         error: friendlyError
       });
     }
 
-    // 8. Extract the text reply safely
     const candidate = data?.candidates?.[0];
-    const textReply = candidate?.content?.parts?.[0]?.text;
+    const parts = candidate?.content?.parts;
+    const reply = Array.isArray(parts)
+      ? parts
+          .map(part => (typeof part?.text === 'string' ? part.text : ''))
+          .join('')
+          .trim()
+      : '';
 
-    if (!textReply || typeof textReply !== 'string') {
-      // Check if blocked by safety ratings
-      if (candidate?.finishReason === 'SAFETY') {
+    if (!reply) {
+      if (candidate?.finishReason === 'SAFETY' || data?.promptFeedback?.blockReason) {
         return res.status(400).json({
-          error: 'The response was blocked by Google safety guidelines.'
+          error: 'This response was blocked by Gemini safety filters. Try rephrasing your question.'
         });
       }
       return res.status(502).json({
-        error: 'Received an empty response from Gemini model.'
+        error: 'Google Gemini returned an empty response. Please try asking again.'
       });
     }
 
-    // 9. Return the clean AI response
     return res.status(200).json({
-      reply: textReply.trim()
+      reply,
+      model
     });
-
   } catch (error) {
-    console.error('Serverless Chat Handler Error:', error);
+    console.error('Serverless /api/chat error:', error);
 
-    if (error.name === 'AbortError') {
+    if (error?.name === 'AbortError') {
       return res.status(504).json({
-        error: 'Request timed out waiting for Gemini response. Please try again.'
+        error: 'The request to Google Gemini timed out. Please try again.'
       });
     }
 
     return res.status(500).json({
-      error: 'An internal server error occurred. Please try again later.'
+      error: 'An unexpected server error occurred while contacting Google Gemini.'
     });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }

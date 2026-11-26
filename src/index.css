@@ -1,33 +1,41 @@
 :root {
-  /* Light Theme (Clean White & Soft Purple) */
-  --bg-primary: #fcfbfe;
-  --bg-secondary: #ffffff;
-  --bg-sidebar: #f6f3ff;
-  --bg-sidebar-hover: #ede9fe;
+  /* Light Theme: Crisp White & Soft Purple */
+  --bg-page: #faf9fe;
+  --bg-surface: #ffffff;
+  --bg-sidebar: #f5f2ff;
+  --bg-hover: #ece7fe;
   --bg-input: #ffffff;
-  --primary: #7c3aed;
-  --primary-hover: #6d28d9;
-  --primary-subtle: #f5f3ff;
-  --primary-border: #ddd6fe;
-  --text-main: #1e1b4b;
+
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-soft: #f3efff;
+  --accent-border: #ddd6fe;
+
+  --text-primary: #1e1b4b;
   --text-secondary: #4b5563;
   --text-muted: #6b7280;
-  --border: #e9e5f7;
+
+  --border: #e9e4f8;
   --border-focus: #8b5cf6;
-  
-  --bubble-user: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
-  --bubble-user-text: #ffffff;
-  --bubble-ai: #ffffff;
-  --bubble-ai-text: #1e1b4b;
-  --bubble-ai-border: #ede9fe;
-  
-  --code-bg: #1e1b2e;
-  --code-header: #151322;
+
+  --user-bubble: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
+  --user-text: #ffffff;
+  --ai-bubble: #ffffff;
+  --ai-text: #1e1b4b;
+  --ai-border: #e9e4f8;
+
+  --code-bg: #181428;
+  --code-header: #110e1e;
   --code-text: #f3f4f6;
 
-  --shadow-sm: 0 1px 3px rgba(124, 58, 237, 0.05);
-  --shadow-md: 0 4px 14px rgba(124, 58, 237, 0.08);
-  --shadow-lg: 0 10px 25px rgba(124, 58, 237, 0.12);
+  --danger: #dc2626;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+  --success: #10b981;
+
+  --shadow-sm: 0 1px 3px rgba(124, 58, 237, 0.06);
+  --shadow-md: 0 6px 18px rgba(124, 58, 237, 0.09);
+  --shadow-lg: 0 14px 32px rgba(30, 27, 75, 0.14);
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -35,61 +43,75 @@
   --radius-full: 9999px;
 }
 
-[data-theme="dark"] {
-  /* Dark Theme (Deep Indigo & Soft Violet) */
-  --bg-primary: #0d0b16;
-  --bg-secondary: #141221;
-  --bg-sidebar: #100e1c;
-  --bg-sidebar-hover: #1e1933;
-  --bg-input: #171426;
-  --primary: #8b5cf6;
-  --primary-hover: #7c3aed;
-  --primary-subtle: #201a38;
-  --primary-border: #3c3260;
-  --text-main: #f5f3ff;
+[data-theme='dark'] {
+  /* Dark Theme: Deep Indigo & Soft Violet */
+  --bg-page: #0c0a16;
+  --bg-surface: #141122;
+  --bg-sidebar: #100d1c;
+  --bg-hover: #1e1934;
+  --bg-input: #171328;
+
+  --accent: #8b5cf6;
+  --accent-hover: #7c3aed;
+  --accent-soft: #211b3b;
+  --accent-border: #3b3161;
+
+  --text-primary: #f5f3ff;
   --text-secondary: #c4b5fd;
   --text-muted: #94a3b8;
-  --border: #26213f;
+
+  --border: #262040;
   --border-focus: #a78bfa;
 
-  --bubble-user: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
-  --bubble-user-text: #ffffff;
-  --bubble-ai: #171426;
-  --bubble-ai-text: #f5f3ff;
-  --bubble-ai-border: #2a2447;
+  --user-bubble: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  --user-text: #ffffff;
+  --ai-bubble: #161326;
+  --ai-text: #f5f3ff;
+  --ai-border: #292345;
 
-  --code-bg: #0b0914;
-  --code-header: #07060e;
+  --code-bg: #090712;
+  --code-header: #06050c;
   --code-text: #e2e8f0;
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.6);
+  --danger: #f87171;
+  --danger-bg: #2a131a;
+  --danger-border: #4b1d27;
+  --success: #34d399;
+
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.65);
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
-body {
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background-color: var(--bg-primary);
-  color: var(--text-main);
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-}
-
+html,
+body,
 #root {
   height: 100%;
   width: 100%;
 }
 
-/* Custom Scrollbars */
+body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  line-height: 1.6;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea {
+  font-family: inherit;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
