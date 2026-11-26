@@ -1,13 +1,17 @@
+
 /**
  * Vercel Serverless Function: POST /api/chat
- * Securely proxies chat requests to the official Google Gemini REST API.
- * GEMINI_API_KEY is read strictly from server environment variables.
+ * Securely connects Nova AI to Google Gemini.
+ * API key stays on the server.
  */
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_API_BASE =
+  'https://generativelanguage.googleapis.com/v1beta/models';
+
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_HISTORY_ITEMS = 16;
+const REQUEST_TIMEOUT = 55000;
 
 function normalizeHistory(history) {
   if (!Array.isArray(history)) return [];
@@ -17,19 +21,21 @@ function normalizeHistory(history) {
 
   for (const item of recent) {
     if (!item || typeof item.content !== 'string') continue;
+
     const text = item.content.trim().slice(0, MAX_MESSAGE_LENGTH);
     if (!text) continue;
 
-    const role = item.role === 'assistant' || item.role === 'model' ? 'model' : 'user';
+    const role =
+      item.role === 'assistant' || item.role === 'model'
+        ? 'model'
+        : 'user';
 
-    // Gemini requires conversation history to start with a user turn
-    if (contents.length === 0 && role === 'model') {
-      continue;
-    }
+    if (contents.length === 0 && role === 'model') continue;
 
-    const prev = contents[contents.length - 1];
-    if (prev && prev.role === role) {
-      prev.parts[0].text += `\n\n${text}`;
+    const previous = contents[contents.length - 1];
+
+    if (previous && previous.role === role) {
+      previous.parts[0].text += `\n\n${text}`;
     } else {
       contents.push({
         role,
@@ -58,34 +64,39 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.GEMINI_API_KEY?.trim();
+
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
     return res.status(500).json({
       error:
-        'GEMINI_API_KEY is not configured on the server. Add it to .env.local for local testing or in your Vercel Project Environment Variables.'
+        'GEMINI_API_KEY is not configured on the server. Add it to your Vercel Environment Variables.'
     });
   }
 
   let body = req.body;
+
   if (typeof body === 'string') {
     try {
       body = JSON.parse(body);
     } catch {
-      return res.status(400).json({ error: 'Invalid JSON request body.' });
+      return res.status(400).json({
+        error: 'Invalid JSON request body.'
+      });
     }
   }
 
   const { message, history } = body || {};
 
-  if (typeof message !== 'string' || message.trim().length === 0) {
+  if (typeof message !== 'string' || !message.trim()) {
     return res.status(400).json({
-      error: 'Please enter a non-empty message before sending.'
+      error: 'Please enter a message.'
     });
   }
 
   const trimmedMessage = message.trim();
+
   if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
     return res.status(400).json({
-      error: `Message is too long. Maximum allowed length is ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`
+      error: `Message is too long. Maximum allowed length is ${MAX_MESSAGE_LENGTH} characters.`
     });
   }
 
@@ -101,8 +112,12 @@ export default async function handler(req, res) {
     });
   }
 
-  const model = (process.env.GEMINI_MODEL || DEFAULT_MODEL).trim();
-  const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
+  const model = (
+    process.env.GEMINI_MODEL || DEFAULT_MODEL
+  ).trim();
+
+  const endpoint =
+    `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
 
   const payload = {
     contents,
@@ -110,19 +125,22 @@ export default async function handler(req, res) {
       parts: [
         {
           text:
-            'You are Nova, a helpful, clear, and friendly AI assistant. Answer accurately and concisely. Use clean Markdown (headings, bullet points, bold text, and fenced code blocks with language tags) whenever it makes the response easier to read.'
+            'You are Nova, a helpful, clear, and friendly AI assistant. Answer accurately and concisely. Use clean Markdown with headings, bullet points, bold text and code blocks when useful.'
         }
       ]
     },
     generationConfig: {
       temperature: 0.7,
       topP: 0.95,
-      maxOutputTokens: 2048
+      maxOutputTokens: 1024
     }
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, REQUEST_TIMEOUT);
 
   try {
     const geminiResponse = await fetch(endpoint, {
@@ -135,7 +153,8 @@ export default async function handler(req, res) {
       signal: controller.signal
     });
 
-    let data = null;
+    let data;
+
     try {
       data = await geminiResponse.json();
     } catch {
@@ -145,46 +164,64 @@ export default async function handler(req, res) {
     if (!geminiResponse.ok) {
       const status = geminiResponse.status;
       const upstreamMessage = data?.error?.message || '';
-      console.error(`Gemini API error (${status}):`, upstreamMessage || data);
 
-      let friendlyError = 'Unable to get a response from Google Gemini right now. Please try again.';
+      console.error(
+        `Gemini API error (${status}):`,
+        upstreamMessage || data
+      );
+
+      let friendlyError =
+        'Unable to get a response from Gemini. Please try again.';
+
       if (status === 400) {
-        friendlyError = upstreamMessage || 'The request sent to Gemini was invalid.';
+        friendlyError = upstreamMessage || 'Invalid Gemini request.';
       } else if (status === 401 || status === 403) {
         friendlyError =
-          'Your Gemini API key was rejected or lacks permission. Please verify GEMINI_API_KEY in your environment variables.';
+          'Gemini API key was rejected or does not have permission. Check your Vercel environment variables.';
       } else if (status === 404) {
-        friendlyError = `The configured Gemini model ("${model}") was not found. Check GEMINI_MODEL or update to a supported model.`;
+        friendlyError =
+          `Gemini model "${model}" was not found. Check your GEMINI_MODEL setting.`;
       } else if (status === 429) {
         friendlyError =
-          'Gemini API rate limit or quota reached. Please wait a few seconds and try again.';
+          'Gemini API quota or rate limit reached. Please try again later.';
       } else if (status >= 500) {
         friendlyError =
-          'Google Gemini is temporarily unavailable or overloaded. Please try again shortly.';
+          'Google Gemini is temporarily unavailable. Please try again shortly.';
       }
 
-      return res.status(status >= 400 && status < 600 ? status : 502).json({
+      return res.status(
+        status >= 400 && status < 600 ? status : 502
+      ).json({
         error: friendlyError
       });
     }
 
     const candidate = data?.candidates?.[0];
     const parts = candidate?.content?.parts;
+
     const reply = Array.isArray(parts)
       ? parts
-          .map(part => (typeof part?.text === 'string' ? part.text : ''))
-          .join('')
-          .trim()
+        .map(part =>
+          typeof part?.text === 'string' ? part.text : ''
+        )
+        .join('')
+        .trim()
       : '';
 
     if (!reply) {
-      if (candidate?.finishReason === 'SAFETY' || data?.promptFeedback?.blockReason) {
+      if (
+        candidate?.finishReason === 'SAFETY' ||
+        data?.promptFeedback?.blockReason
+      ) {
         return res.status(400).json({
-          error: 'This response was blocked by Gemini safety filters. Try rephrasing your question.'
+          error:
+            'Gemini blocked this response. Please rephrase your question.'
         });
       }
+
       return res.status(502).json({
-        error: 'Google Gemini returned an empty response. Please try asking again.'
+        error:
+          'Gemini returned an empty response. Please try again.'
       });
     }
 
@@ -192,18 +229,22 @@ export default async function handler(req, res) {
       reply,
       model
     });
+
   } catch (error) {
     console.error('Serverless /api/chat error:', error);
 
     if (error?.name === 'AbortError') {
       return res.status(504).json({
-        error: 'The request to Google Gemini timed out. Please try again.'
+        error:
+          'Gemini took too long to respond. Please try again.'
       });
     }
 
     return res.status(500).json({
-      error: 'An unexpected server error occurred while contacting Google Gemini.'
+      error:
+        'An unexpected error occurred while contacting Gemini.'
     });
+
   } finally {
     clearTimeout(timeoutId);
   }
