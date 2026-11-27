@@ -4,7 +4,7 @@
  * Vercel Serverless Function: POST /api/chat
  */
 
-const DEFAULT_MODEL = "gemini-flash-latest";
+const DEFAULT_MODEL = "gemini-2.5-flash";
 
 const GEMINI_API_BASE =
   "https://generativelanguage.googleapis.com/v1beta/models";
@@ -12,6 +12,7 @@ const GEMINI_API_BASE =
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_HISTORY_ITEMS = 16;
 const REQUEST_TIMEOUT = 50000;
+const MAX_RETRIES = 2;
 
 function normalizeHistory(history) {
   if (!Array.isArray(history)) return [];
@@ -22,7 +23,6 @@ function normalizeHistory(history) {
     if (!item || typeof item.content !== "string") continue;
 
     const text = item.content.trim().slice(0, MAX_MESSAGE_LENGTH);
-
     if (!text) continue;
 
     const role =
@@ -47,22 +47,12 @@ function normalizeHistory(history) {
   return contents;
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
-
-  if (req.method === "OPTIONS") {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "POST, OPTIONS"
-    );
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      "Content-Type"
-    );
-
-    return res.status(200).end();
-  }
 
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -70,18 +60,14 @@ export default async function handler(req, res) {
     });
   }
 
-  // 1. Check API key
   const apiKey = process.env.GEMINI_API_KEY?.trim();
 
   if (!apiKey || apiKey === "your_gemini_api_key_here") {
-    console.error("GEMINI_API_KEY is missing.");
-
     return res.status(500).json({
       error: "Gemini API key is not configured on Vercel."
     });
   }
 
-  // 2. Read request body
   let body = req.body;
 
   if (typeof body === "string") {
@@ -116,9 +102,7 @@ export default async function handler(req, res) {
     });
   }
 
-  // 3. Prepare conversation
   const contents = normalizeHistory(history);
-
   const lastTurn = contents[contents.length - 1];
 
   if (lastTurn && lastTurn.role === "user") {
@@ -130,7 +114,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // 4. Select Gemini model
   const model = (
     process.env.GEMINI_MODEL || DEFAULT_MODEL
   ).trim();
@@ -138,14 +121,12 @@ export default async function handler(req, res) {
   const endpoint =
     `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`;
 
-  // 5. Gemini request payload
   const payload = {
     contents,
 
     systemInstruction: {
-      parts: [
-        {
-          text: `
+      parts: [{
+        text: `
 You are Nova, a helpful AI assistant.
 
 Your responsibilities:
@@ -155,9 +136,8 @@ Your responsibilities:
 - Use headings and bullet points when useful.
 - Write clean Markdown.
 - If you are unsure, say so honestly.
-          `.trim()
-        }
-      ]
+        `.trim()
+      }]
     },
 
     generationConfig: {
@@ -167,149 +147,128 @@ Your responsibilities:
     }
   };
 
-  // 6. Set request timeout
-  const controller = new AbortController();
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
 
-  let timedOut = false;
-
-  const timeoutId = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, REQUEST_TIMEOUT);
-
-  try {
-    console.log("Nova AI: Sending request to Gemini.");
-    console.log("Gemini model:", model);
-
-    // 7. Call Gemini API
-    const geminiResponse = await fetch(endpoint, {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": apiKey
-      },
-
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-
-    const responseText = await geminiResponse.text();
-
-    let data;
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REQUEST_TIMEOUT
+    );
 
     try {
-      data = JSON.parse(responseText);
-    } catch {
-      console.error("Gemini returned an invalid response.");
+      console.log("Nova AI: Sending request.");
+      console.log("Gemini model:", model);
+      console.log("Attempt:", attempt + 1);
 
-      return res.status(502).json({
-        error: "Gemini returned an invalid response. Please try again."
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
-    }
 
-    // 8. Handle Gemini API errors
-    if (!geminiResponse.ok) {
-      const status = geminiResponse.status;
+      const responseText = await response.text();
 
-      const googleError =
-        data?.error?.message || "";
+      let data;
 
-      console.error("Gemini API status:", status);
-      console.error("Gemini API error:", googleError);
-
-      if (status === 400) {
-        return res.status(400).json({
-          error: googleError || "Invalid Gemini request."
-        });
-      }
-
-      if (status === 401 || status === 403) {
-        return res.status(status).json({
-          error: "Gemini API key is invalid or does not have permission."
-        });
-      }
-
-      if (status === 404) {
-        return res.status(404).json({
-          error: `Gemini model "${model}" was not found.`
-        });
-      }
-
-      if (status === 429) {
-        return res.status(429).json({
-          error: "Gemini API quota or rate limit reached. Try again later."
-        });
-      }
-
-      if (status >= 500) {
+      try {
+        data = JSON.parse(responseText);
+      } catch {
         return res.status(502).json({
-          error: "Google Gemini is temporarily unavailable."
+          error: "Gemini returned an invalid response."
         });
       }
 
-      return res.status(502).json({
-        error: googleError || "Gemini request failed."
-      });
-    }
+      if (!response.ok) {
+        const status = response.status;
+        const googleError = data?.error?.message || "";
 
-    // 9. Extract AI response
-    const candidate = data?.candidates?.[0];
+        console.error("Gemini API status:", status);
+        console.error("Gemini API error:", googleError);
 
-    const parts = candidate?.content?.parts || [];
+        if (
+          (status === 429 || status === 500 ||
+            status === 502 || status === 503 ||
+            status === 504) &&
+          attempt < MAX_RETRIES
+        ) {
+          await wait(1000 * (attempt + 1));
+          continue;
+        }
 
-    const reply = parts
-      .map(part =>
-        typeof part.text === "string" ? part.text : ""
-      )
-      .join("")
-      .trim();
+        if (status === 401 || status === 403) {
+          return res.status(status).json({
+            error: "Gemini API key is invalid or does not have permission."
+          });
+        }
 
-    if (!reply) {
-      console.error(
-        "Gemini returned no text. Finish reason:",
-        candidate?.finishReason
-      );
+        if (status === 404) {
+          return res.status(404).json({
+            error: `Gemini model "${model}" was not found.`
+          });
+        }
 
-      if (
-        candidate?.finishReason === "SAFETY" ||
-        data?.promptFeedback?.blockReason
-      ) {
+        if (status === 429) {
+          return res.status(429).json({
+            error: "Gemini API quota or rate limit reached. Try again later."
+          });
+        }
+
+        if (status >= 500) {
+          return res.status(502).json({
+            error: "Gemini is temporarily unavailable. Please try again later."
+          });
+        }
+
         return res.status(400).json({
-          error: "Gemini could not answer this request. Please rephrase it."
+          error: googleError || "Gemini request failed."
         });
       }
 
+      const candidate = data?.candidates?.[0];
+
+      const reply = (candidate?.content?.parts || [])
+        .map(part =>
+          typeof part.text === "string" ? part.text : ""
+        )
+        .join("")
+        .trim();
+
+      if (!reply) {
+        return res.status(502).json({
+          error: "Gemini returned an empty response."
+        });
+      }
+
+      console.log("Nova AI: Response received.");
+
+      return res.status(200).json({
+        success: true,
+        reply,
+        model
+      });
+
+    } catch (error) {
+      console.error("Nova AI request failed:", error?.name);
+
+      if (attempt < MAX_RETRIES) {
+        await wait(1000 * (attempt + 1));
+        continue;
+      }
+
       return res.status(502).json({
-        error: "Gemini returned an empty response."
+        error: "Unable to connect to Gemini. Please try again."
       });
+
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    // 10. Successful response
-    console.log("Nova AI: Gemini response received.");
-
-    return res.status(200).json({
-      success: true,
-      reply,
-      model
-    });
-
-  } catch (error) {
-    console.error("Nova AI request failed:", error?.name || "UnknownError");
-
-    if (timedOut || error?.name === "AbortError") {
-      return res.status(504).json({
-        error: timedOut
-          ? "Gemini request exceeded 50 seconds. Please try again."
-          : "The connection to Gemini was interrupted. Please try again."
-      });
-    }
-
-    return res.status(502).json({
-      error: "Unable to connect to Google Gemini. Check your connection and try again."
-    });
-
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  return res.status(502).json({
+    error: "Gemini is temporarily unavailable."
+  });
 }
